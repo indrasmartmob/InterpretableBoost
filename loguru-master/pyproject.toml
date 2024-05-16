@@ -1,0 +1,32 @@
+[tool.black]
+force-exclude = "tests/exceptions/source/modern/*"
+line-length = 100
+target-version = ["py35"]
+
+[tool.mypy]
+strict = true
+
+[tool.pytest.ini_options]
+addopts = "-l"
+filterwarnings = [
+  # By default all warnings are treated as errors.
+  'error',
+  # Mixing threads and "fork()" is deprecated, but we need to test it anyway.
+  'ignore:.*use of fork\(\) may lead to deadlocks in the child.*:DeprecationWarning'
+]
+testpaths = ["tests"]
+
+[tool.ruff]
+exclude = ["tests/exceptions/source/*"]
+line-length = 100
+# Enforce pyflakes(F), pycodestyle(E, W), isort (I), bugbears (B), and pep8-naming (N) rules.
+select = ["F", "E", "W", "I", "B", "N", "RET"]
+
+[tool.ruff.pycodestyle]
+max-doc-length = 100
+
+[tool.typos.default]
+extend-ignore-re = ["(?Rm)^.*# spellchecker: disable-line$"]
+
+[tool.typos.files]
+extend-exclude = ["tests/exceptions/output/**"]  # False positive due to ansi sequences.
