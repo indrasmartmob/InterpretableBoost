@@ -2,7 +2,7 @@ import glob
 import sys
 from pathlib import Path
 file_path = Path(__file__)
-parent_directory_path = file_path.parent
+parent_directory_path = file_path.parent.parent
 logurupath=str(parent_directory_path)+"\loguru-master"
 sys.path.insert(0,logurupath)
 from loguru import logger
