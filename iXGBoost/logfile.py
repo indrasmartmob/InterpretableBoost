@@ -7,7 +7,7 @@ logurupath=str(parent_directory_path)+"\loguru-master"
 sys.path.insert(0,logurupath)
 from loguru import logger
 
-enable_disable_str="iXGBoost2"
+enable_disable_str="iXGBoost"
 
 def log_enable():
     logger.enable(enable_disable_str)
