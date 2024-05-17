@@ -8,6 +8,7 @@ import json
 from xgboost import XGBRegressor, XGBClassifier
 
 from ..logfile import logger, log_enable, log_disable
+from .._src import utility
 
 def fn_check(verbose=True):
     if verbose==True:
@@ -27,4 +28,30 @@ def fn_check(verbose=True):
     logger.critical("A critical message.")
     log_disable()
     return None
+
+class InterpretableXGBClassifier(XGBClassifier):
+    """
+    Train an interpretable XGBoost Classifier model with monotonocity constraint.
+
+    Parameters
+    -----------
+    increasing_vars: list
+        list of monotonic increasing variables
+    decreasing_vars: list
+        list of monotonic decreasing variables
+    xgb_params: dict
+        initial arguments for the XGBoost model
+    """
+
+    def __init__(self, increasing_vars = [], decreasing_vars = [], **xgb_params):
+        """
+        
+        """
+        log_enable()
+        logger.info(F"Starting of __init__:{__name__}")
+        super().__init__(**xgb_params)
+        self.increasing_vars = increasing_vars
+        self.decreasing_vars = decreasing_vars
+        logger.info(F"Ending of __init__:{__name__}")
+        return None
 

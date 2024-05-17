@@ -76,11 +76,11 @@ def fn_clean_lookup(df):
     return df.drop(overlap_index)
 
 
-def fn_convert_row(data_col, cutoffs):
+def fn_convert_row_1d(data_cols, cutoffs):
     """
     
     """
-    logger.info(F"Starting of {fn_convert_row.__qualname__}")
+    logger.info(F"Starting of {fn_convert_row_1d.__qualname__}")
 
     intervals = [-np.inf] + [i for i in cutoffs.index.to_list()]
     logger.info(F"The intervals used for cutoff values: type(intervals):{type(intervals)}, intervals[0]:{intervals[0]}, intervals[-1]:{intervals[-1]}")
@@ -90,11 +90,39 @@ def fn_convert_row(data_col, cutoffs):
     mapping_dict = dict(map(lambda k, v: (k,v), keys, values))
     logger.info(f"mapping_dict -- type(mapping_dict):{type(mapping_dict)}")
 
-    values_bins = pd.cut(data_col, intervals, labels=False, right=False)
+    values_bins = pd.cut(data_cols, intervals, labels=False, right=False)
     logger.info(f"values_bins -- type(values_bins):{type(values_bins)}")
     final_values = values_bins.map(mapping_dict).values
     logger.info(f"final_values -- type(final_values):{type(final_values)}")
 
-    logger.info(F"Ending of {fn_convert_row.__qualname__}")
+    logger.info(F"Ending of {fn_convert_row_1d.__qualname__}")
     return final_values
 
+def fn_convert_row_2d(data_cols1, data_cols2, cutoffs):
+    """
+    
+    """
+    logger.info(F"Starting of {fn_convert_row_2d.__qualname__}")
+
+    intervals1 = [-np.inf] + cutoffs.columns.to_list()
+    logger.info(F"using columns -- type(intervals1):{type(intervals1)}, intervals1[0]:{intervals1[0]}, intervals1[-1]:{intervals1[-1]}")
+
+    intervals2 = [-np.inf] + cutoffs.index.to_list()
+    logger.info(F"using index -- type(intervals2):{type(intervals2)}, intervals2[0]:{intervals2[0]}, intervals2[-1]:{intervals2[-1]}")
+
+    mapping_dict = {}
+    for idx_i, i in enumerate(cutoffs.values):
+        for idx_j, j in enumerate(i):
+            mapping_dict.update({(idx_i, idx_j): j})
+    logger.info(f"mapping_dict -- type(mapping_dict):{type(mapping_dict)}")
+
+    values_bins1 = pd.cut(data_cols1, intervals1, labels=False, right=False)
+    logger.info(f"values_bins1 -- type(values_bins1):{type(values_bins1)}")
+    values_bins2 = pd.cut(data_cols2, intervals2, labels=False, right=False)
+    logger.info(f"values_bins2 -- type(values_bins2):{type(values_bins2)}")
+
+    final_values = pd.Series(map(lambda x: mapping_dict[x], zip(values_bins2, values_bins1))).values
+    logger.info(f"final_values -- type(final_values):{type(final_values)}")
+
+    logger.info(F"Ending of {fn_convert_row_2d.__qualname__}")
+    return final_values
