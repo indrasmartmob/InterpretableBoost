@@ -8,8 +8,6 @@ import json
 from xgboost import XGBRegressor, XGBClassifier
 
 from ..logfile import logger, log_enable, log_disable
-import utility
-import interpretable_xgb_classifier
 
 def fn_check(verbose=True):
     if verbose==True:
@@ -29,5 +27,4 @@ def fn_check(verbose=True):
     logger.critical("A critical message.")
     log_disable()
     return None
-
 
