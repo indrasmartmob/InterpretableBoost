@@ -209,5 +209,17 @@ def aggregation_algorithm(model_var_list, model_info, num_cols):
         pair_effect = {tuple(vars): np.zeros(num_rows) for vars in pair_vars_index}
         for i_tree in tree_vars_set[tuple((var1, var2))]:
             tree_info = model_info[i_tree]
-            
+            next_sub_tree = []
+            tree_info["split_vars"] = set()
+            tree_info["indicator"] = np.ones(num_rows)
+            sub_tree_info = [tree_info]
+            while sub_tree_info:
+                for sub_tree in sub_tree_info:
+                    split_vars = sub_tree["split_vars"].copy()
+                    if "leaf" in sub_tree:
+                        if len(split_vars) == 2:
+                            pair_effect[tuple(sorted(split_vars))] += sub_tree["indicator"] * sub_tree["leaf"]
+                    else:
+                        
+
 
