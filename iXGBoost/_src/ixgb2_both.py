@@ -250,6 +250,236 @@ def aggregation_algorithm(model_var_list, model_info, num_cols):
 
     return single_effect_index, pair_effect_index, df_single_lookup_set, df_pair_lookup_set, single_node_intercept, num_tree_var, num_tree_vars
 
+def combine_lookups(df_lu1, df_lu2):
+    """Combine tow lookup tables into one.
+
+    Parameters
+    --------------
+    df_lookup1: pandas dataframe
+        dataframe of main effect
+    df_lookup2: pandas dataframe
+        dataframe of main effect
+    """
+
+    df_lookup1 = df_lu1.drop(np.nan).copy()
+    df_lookup2 = df_lu2.drop(np.nan).copy()
+
+    df_lookup_new1 = df_lookup1.copy()
+    for thres in df_lookup2.index:
+        if thres not in df_lookup1.index:
+            val = df_lookup1.iloc[sum(df_lookup1.index < thres)]
+            val.name = thres
+            df_lookup_new1 = df_lookup_new1.append(val)
+    df_lookup_new1 = df_lookup_new1.sort_index()
+
+    df_lookup_new2 = df_lookup2.copy()
+    for thres in df_lookup1.index:
+        if thres not in df_lookup2.index:
+            val = df_lookup2.iloc[sum(df_lookup2.index < thres)]
+            val.name = thres
+            df_lookup_new2 = df_lookup_new2.append(val)
+    df_lookup_new2 = df_lookup_new2.sort_index()
+
+    df_lookup_num = df_lookup_new1 + df_lookup_new2
+    df_lookup_nan = pd.DataFrame(df_lu1.loc[np.nan, :].values + df_lu2.loc[np.nan, :].values, index = [np.nan], columns = df_lookup_num.columns)
+    df_lookup_comb = pd.concat([df_lookup_nan, df_lookup_num], axis=0)
+
+    return df_lookup_comb
+
+def decompose_free(val_mat):
+    """Data-free decomposition method"""
+
+    intercept = val_mat.mean().mean()
+    val_mat_cen = val_mat - intercept
+
+    main_x = val_mat_cen.copy().mean(axis=0)
+    main_y = val_mat_cen.copy().mean(axis=1)
+    pair_xy = ((val_mat_cen - main_x).T - main_y).T
+
+    return intercept, main_x, main_y, pair_xy
+
+def center_row_col(dist, val_mat):
+    """center rows and columns using a given joint distribution"""
+
+    intercept = (val_mat * dist).sum().sum()
+    val_mat_cen = val_mat - intercept
+
+    cond_dist_x = dist / dist.sum(axis = 0)
+    cond_dist_y = (dist.T / dist.sum(axis = 1)).T
+
+    main_x = (val_mat_cen * cond_dist_x).sum(axis = 0)
+    main_y = (val_mat_cen * cond_dist_y).sum(axis = 1)
+    pair_xy = ((val_mat_cen - main_x).T - main_y).T
+
+    max_col_row_mean = max(max(abs((pair_xy * cond_dist_y).sum(axis = 1))), max(abs((pair_xy * cond_dist_x).sum(axis = 0))))
+
+    return intercept, main_x, main_y, pair_xy, max_col_row_mean
+
+def decompose_ind(dist, val_mat):
+    """Decomposition method with independence assumption (marginal distribution approach)"""
+
+    dist_ind = dist.copy()
+    marg_dist_x = dist.sum(axis = 0)
+    marg_dist_y = dist.sum(axis = 1)
+    dist_ind.iloc[:, :] = np.outer(pd.DataFrame(marg_dist_y), pd.DataFrame(marg_dist_x).T)
+
+    return center_row_col(dist_ind, val_mat)
+
+def decompose_full(dist, val_mat):
+    """Decomposition method with full distribution"""
+
+    max_col_row_mean = 1
+    main_x_cumul = 0
+    main_y_cumul = 0
+    intercept_cumul = 0
+    pair_xy = val_mat.copy()
+    k = 0
+    while ((max_col_row_mean > 1E-12) & (k < 100)):
+        intercept, main_x, main_y, pair_xy, max_col_row_mean = center_row_col(dist, pair_xy)
+        intercept_cumul += intercept
+        main_x_cumul += main_x
+        main_y_cumul += main_y
+        k = k + 1
+    if k == 100:
+        print("No convergence")
+        print(f"{k}th iteration: max col/row mean={max_col_row_mean}")
+    
+    return intercept_cumul, main_x_cumul, main_y_cumul, pair_xy, max_col_row_mean
+
+def decomposition_algorithm(X, global_intercept, decomp_method, df_single_lookup_set, df_pair_lookup_set):
+    """Decomposition algorithm with three decomposition methods (Distribution-free, Marginal distribution (independence assumption), and Full distribution).
+    
+    Parameters
+    ------------
+    X: pandas dataframe
+        used for distribution calculation
+    global_intercept: float
+        global intercept
+    decomp_method: string
+        the decomposition method used to decompose the lookup table, chosen from 'free', 'ind', and 'full'
+    df_single_lookup_set: pandas dataframe
+        lookup table for main effect
+    df_pair_lookup_set: pandas dataframe
+        lookup table for pairwise interaction effect
+
+    """
+    if decomp_method == "free":
+        #create a global intercept by adding averages from tables -- single effect
+        for single in list(df_single_lookup_set.keys()):
+            val_mat = df_single_lookup_set[single].copy()
+            single_intercept = val_mat.mean(axis = 0).values[0]
+            df_single_new = val_mat - single_intercept
+            global_intercept = global_intercept + single_intercept
+            df_single_lookup_set[single] = df_single_new
+        
+        # create a global intercept by adding averages from tables -- pairwise effect
+        for pair in list(df_pair_lookup_set.keys()):
+            var1, var2 = pair
+            val_mat = df_pair_lookup_set[pair].copy()
+
+            intercept_free, main_x_free, main_y_free, pair_xy_free = decompose_free(val_mat)
+
+            global_intercept = global_intercept + intercept_free
+            df_pair_lookup_set[pair] = pair_xy_free
+            df_lookup1 = pd.DataFrame(main_x_free, columns = [var1]).copy()
+            df_lookup2 = pd.DataFrame(main_y_free, columns = [var2]).copy()
+
+            if var1 in df_single_lookup_set.keys():
+                df_single_lookup_set[var1] = combine_lookups(df_single_lookup_set[var1], df_lookup1)
+            else:
+                df_single_lookup_set[var1] = df_lookup1
+            if var2 in df_single_lookup_set.keys():
+                df_single_lookup_set[var2] = combine_lookups(df_single_lookup_set[var2], df_lookup2)
+            else:
+                df_single_lookup_set[var2] = df_lookup2
+    
+
+    elif (decomp_method == "ind")|(decomp_method == "full"):
+        df_single_lookup_num_obs, _, df_pair_lookup_num_obs, _ = lookup_obs_helper(X, df_single_lookup_set, df_pair_lookup_set)
+
+        if decomp_method == "ind":
+            #create a global intercept by adding averages from tables -- single effect
+            for single in list(df_single_lookup_set.keys()):
+                val_mat = df_single_lookup_set[single].copy()
+                freqs = df_single_lookup_num_obs[single]
+                dist = freqs / freqs.sum()
+                single_intercept = (val_mat * dist).sum().values[0]
+                df_single_new = val_mat - single_intercept
+                global_intercept = global_intercept + single_intercept
+                df_single_lookup_set[single] = df_single_new
+            
+            # create a global intercept by adding averages from tables -- pairwise effect
+            for pair in list(df_pair_lookup_set.keys()):
+                var1, var2 = pair
+                val_mat = df_pair_lookup_set[pair].copy()
+                freqs = df_pair_lookup_num_obs[pair]
+                dist = freqs / freqs.sum().sum()
+
+                intercept_ind, main_x_ind, main_y_ind, pair_xy_ind, max_col_row_mean_ind = decompose_ind(dist, val_mat)
+
+                global_intercept = global_intercept + intercept_ind
+                df_pair_lookup_set[pair] = pair_xy_ind
+                df_lookup1 = pd.DataFrame(main_x_ind, columns = [var1]).copy()
+                df_lookup2 = pd.DataFrame(main_y_ind, columns = [var2]).copy()
+
+                if var1 in df_single_lookup_set.keys():
+                    df_single_lookup_set[var1] = combine_lookups(df_single_lookup_set[var1], df_lookup1)
+                else:
+                    df_single_lookup_set[var1] = df_lookup1
+                if var2 in df_single_lookup_set.keys():
+                    df_single_lookup_set[var2] = combine_lookups(df_single_lookup_set[var2], df_lookup2)
+                else:
+                    df_single_lookup_set[var2] = df_lookup2
+        else:
+            #create a global intercept by adding averages from tables -- single effect
+            for single in list(df_single_lookup_set.keys()):
+                val_mat = df_single_lookup_set[single].copy()
+                freqs = df_single_lookup_num_obs[single]
+                dist = freqs / freqs.sum()
+                single_intercept = (val_mat * dist).sum().values[0]
+                df_single_new = val_mat - single_intercept
+                global_intercept = global_intercept + single_intercept
+                df_single_lookup_set[single] = df_single_new
+            
+            # create a global intercept by adding averages from tables -- pairwise effect
+            for pair in list(df_pair_lookup_set.keys()):
+                var1, var2 = pair
+                val_mat = df_pair_lookup_set[pair].copy()
+                freqs = df_pair_lookup_num_obs[pair]
+                dist = freqs / freqs.sum().sum()
+
+                intercept_full, main_x_full, main_y_full, pair_xy_full, max_col_row_mean_full = decompose_full(dist, val_mat)
+
+                global_intercept = global_intercept + intercept_full
+                df_pair_lookup_set[pair] = pair_xy_full
+                df_lookup1 = pd.DataFrame(main_x_full, columns= [var1]).copy()
+                df_lookup2 = pd.DataFrame(main_y_full, columns= [var2]).copy()
+
+                if var1 in df_single_lookup_set.keys():
+                    df_single_lookup_set[var1] = combine_lookups(df_single_lookup_set[var1], df_lookup1)
+                else:
+                    df_single_lookup_set[var1] = df_lookup1
+                if var2 in df_single_lookup_set.keys():
+                    df_single_lookup_set[var2] = combine_lookups(df_single_lookup_set[var2], df_lookup2)
+                else:
+                    df_single_lookup_set[var2] = df_lookup2
+    
+    else:
+        print("Please enter free, ind, full as the decomposition method!")
+    
+    return global_intercept, df_single_lookup_set, df_pair_lookup_set
+
+def clean_lookup(df_lookup):
+    """Remove repeated cells with the same threshold.
+    
+    Parameters
+    -------------
+    df_lookup: pandas dataframe
+        dataframe of main effect
+    """
+    overlap_index = [df_lookup.index[i_row] for i_row in range(df_lookup.shape[0] - 1) if df_lookup.iloc[i_row][0] == df_lookup.iloc[i_row + 1][0]]
+    return df_lookup.drop(overlap_index)
+
 
 
 
