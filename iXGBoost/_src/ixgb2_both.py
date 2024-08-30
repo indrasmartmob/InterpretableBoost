@@ -220,6 +220,37 @@ def aggregation_algorithm(model_var_list, model_info, num_cols):
                         if len(split_vars) == 2:
                             pair_effect[tuple(sorted(split_vars))] += sub_tree["indicator"] * sub_tree["leaf"]
                     else:
-                        
+                        for child in sub_tree["children"]:
+                            split_var = sub_tree["split"]
+                            if child["nodeid"] == sub_tree["yes"]:
+                                if child["nodeid"] == sub_tree["missing"]:
+                                    temp = (X_eval[split_var] < sub_tree["split_condition"])|(X_eval[split_var].isna())
+                                else:
+                                    temp = (X_eval[split_var] < sub_tree["split_condition"])
+                                child["indicator"] = sub_tree["indicator"] * temp
+                            else:
+                                if child["nodeid"] == sub_tree["missing"]:
+                                    temp = (X_eval[split_var] >= sub_tree["split_condition"])|(X_eval[split_var].isna())
+                                else:
+                                    temp = (X_eval[split_var] >= sub_tree["split_condition"])
+                                child["indicator"] = sub_tree["indicator"] * temp
+                            next_sub_tree.append(child)
+                sub_tree_info = next_sub_tree
+                next_sub_tree = []
+        df_pair_lookup_set[tuple((var1, var2))] = pd.DataFrame(np.array(pair_effect[tuple((var1, var2))]).reshape(len(eval_set1)), len(eval_set2).T, index = thres2_list, columns = thres1_list)
+
+        index_set = set()
+        for pair in list(tree_vars_set.keys()):
+            index_set = index_set.union(pair)
+        non_empty_key = [var for var in list(df_single_lookup_set) if tree_var_set[var] != set()]
+        num_tree_var = {var:len(tree_var_set[var]) for var in non_empty_key}
+        non_empty_keys = [pair for pair in list(df_pair_lookup_set) if tree_vars_set[pair] != set()]
+        num_tree_vars = {pair:len(tree_vars_set[pair]) for pair in non_empty_keys}
+
+
+    return single_effect_index, pair_effect_index, df_single_lookup_set, df_pair_lookup_set, single_node_intercept, num_tree_var, num_tree_vars
+
+
+
 
 
