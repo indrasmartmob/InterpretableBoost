@@ -731,4 +731,284 @@ def lookup_obs_helper(X, df_single_lookup_set, df_pair_lookup_set):
     
     return df_single_lookup_num_obs, df_single_lookup_obs_location, df_pair_lookup_num_obs, df_pair_lookup_obs_location
 
+def get_lookup_table_helper(effect_index, pair_effect_index, df_pair_lookup_set, single_effect_index, df_single_lookup_set):
+
+    """get the lookup table for a specific effect
+    
+    Parameters
+    -------------
+    effect_index: string
+        the name of effect
+    single_effect_index: list
+        a list of names of main effect
+    pair_effect_index: list
+        a list of names of pairwise interaction effect
+    df_single_lookup_set: pandas dataframe
+        lookup table for main effect
+    df_pair_lookup_set: pandas dataframe
+        lookup table for pairwise interaction effect
+
+    """
+
+    if (type(effect_index) is tuple)&(len(effect_index)==2):
+        if effect_index in pair_effect_index:
+            var1, var2 = effect_index
+            print("Pairwise effect lookup table (logodds) for features:" + var1 + " (column)" + " and " + var2 + " (row)")
+            return df_pair_lookup_set[effect_index]
+        
+        elif effect_index[::-1] in pair_effect_index:
+            var1, var2 = effect_index
+            print("Pairwise effect lookup table (logodds) for features:" + var1 + " (column)" + " and " + var2 + " (row)")
+            return df_pair_lookup_set[effect_index[::-1]].T
+        
+        else:
+            print("This pairwise effect does not exist!")
+            return
+    
+    elif type(effect_index) is str:
+        print("Single effect lookup table (logodds) for feature: " + effect_index)
+        if effect_index in single_effect_index:
+            return df_single_lookup_set[effect_index]
+        
+        else:
+            print("This single effect does not exist!")
+            return
+    
+    else:
+        print("Please enter tuple with length of 2 for pairwise effect or single string for single effect!")
+        return
+
+def main_val_plot(gsi, f, var, X, int_var_set, lookup_set, num_bins, effect_imp_var, bound_pct, bound_val, verbose):
+    """Plot main effect.
+    
+    Parameters
+    --------------
+    var: string
+        name of the feature for plotting
+    X: pandas dataframe
+        dataset for histogram
+    int_var_set: list
+        list of names of integer values features
+    lookup_set: dictionary
+        dictionary of main effect lookup tables
+    num_bins: integer
+        number of bins for histogram
+    effect_imp_var: float
+        effect importance
+    bound_pct: list of float
+        lower bound percentile and upper bound percentile for clipping
+    bound_val: list of float
+        lower bound value and upper bound value for clipping
+    """
+    gs_i = gsi.subgridspec(20, 1, wspace=0.7, hspace=1.4)
+    ax_main = f.add_subplot(gs_i[:17, 0])
+
+    x = X[var]
+    x_min = np.min(x)
+    x_max = np.max(x)
+
+    if (var in int_var_set) & (x_max - x_min < 30):
+        index = True
+        if verbose:
+            print(f"Feature: {var}")
+            print(f"min={np.min(x)}, max={np.max(x)}")
+            print(f"This feature is integer, no need to be capped!")
+        df_x_val = x.value_counts()
+        df_table = lookup_set
+
+        t = df_x_val.index.tolist()
+        apart = t[1] - t[0]
+        tn = [t[0] - apart] + t
+    
+    else:
+        index = False
+        if len(bound_pct) == 2:
+            lb_pct, ub_pct = bound_pct
+            wq = DescrStatsW(data=np.array(X[var]))
+            [x_min, x_max] = wq.quantile(probs=np.array([lb_pct, ub_pct]), return_pandas=False)
+        if len(bound_val) == 2:
+            x_min, x_max = bound_val
+        x = X.loc[(((X[var]>=x_min)&(X[var]<=x_max))|(X[var].isna())), var]
+        if verbose:
+            print(f"Feature: {var}")
+            print(f"min={np.min(X[var])}, max={np.max(X[var])}")
+            print(f"capped at: lb={x_min}, ub={x_max}")
+        df_x_val = x.value_counts()
+        df_table = lookup_set
+        df_table = df_table.loc[((df_table.index>=x_min)&(df_table.index<=x_max))|(df_table.index.isna())]
+
+        xx = np.linspace(x_min, x_max, num=num_bins)
+        t = list(xx)
+        apart = t[1] - t[0]
+        tn = [t[0]-apart]+t
+
+    y_min = np.min(df_table.values)
+    y_max = np.max(df_table.values)
+
+
+    ### plot main effect
+    ax_main.set_title(str(var) + " (" + str("{0:.1%}".format(effect_imp_var)) + ')', fontsize=10)
+    plt.ylabel("log odds")
+
+    plt.xlim([x_min - 2* apart, x_max])
+    plt.xticks([])
+
+    if var in int_var_set:
+        df_table.index = np.ceil(np.array(df_table.index)) - 0.5
+        plt.xlim([x_min - 0.5 -2* apart, x_max + 0.5])
+    
+    x_lb_pt = np.hstack([x_min, np.array(df_table.index[1:-1].tolist()).flatten(), x_max + 0.5])
+    try:
+        y_lb_pt = np.hstack([df_table.values[1], np.array(df_table.values[1:].tolist()).flatten()])
+    except:
+        print(f"For feature {var}, you clipped too much data! Please increase upper bound or decrease the lower bound!")
+    else:
+        plt.step(x_lb_pt, y_lb_pt)
+    
+    # if X.isnull().values.any():
+    x_nan = tn[0]
+    y_nan = df_table.values[0]
+    plt.plot(x_nan, y_nan, "o", color="r")
+
+    ### plot histogram or bar plot
+    ax_bottom = f.add_subplots(gs_i[17:, 0])
+
+    if index:
+        ax_bottom.bar(t, df_x_val.tolist(), color="b", alpha=0.1, width=apart, edgecolor="b")
+        tlabels=[str(int(e) for e in t)]
+        ax_bottom.set_xticks(t)
+        ax_bottom.set_xticklabels(tlabels, rotation=45)
+    
+        # if X.isnull().values.any():
+        ax_bottom.bar([x_nan], [sum(x.isna())], color="r", alpha=0.1, width=apart, edgecolor="r")
+        tlabels=[str(int(e)) for e in tn]
+        tlabels[0]="NaN"
+        ax_bottom.set_xticks(tn)
+        ax_bottom.set_xticklabels(tlabels, rotation=45)
+
+    else:
+        ax_bottom.hist(x, bins= num_bins, alpha=0.1, color="b", edgecolor="b")
+        tlabels=["{:.1f}".format(e) for e in tn]
+        ax_bottom.set_xticks(t)
+        ax_bottom.set_xticklabels(tlabels, rotation=45)
+
+        # if X.isnull().values.any():
+        ax_bottom.bar([x_nan], [sum(x.isna())], color="r", alpha=0.1, width=apart, edgecolor="r")
+        tlabels=["{:.1f}".format(e) for e in tn]
+        tlabels[0]="NaN"
+        ax_bottom.set_xticks(tn)
+        ax_bottom.set_xticklabels(tlabels, rotation=45)
+
+    if var in int_var_set:
+        plt.xlim([x_min - 0.5 - 2*apart, x_max + 0.5])
+    else:
+        plt.xlim([x_min - 2*apart, x_max])
+    
+    plt.yticks([])
+
+def pairwise_val_plot(gsi, f, pair, X, int_var_set, lookup_set, effect_imp_var, bound_pct, bound_val, verbose):
+    """Plot pairwise interaction efect.
+    
+    Parameters
+    ------------
+    pair: tuple
+        tuple of names of two features for plotting
+    X: pandas dataframe
+        dataset for histogram
+    int_var_set: list
+        list of names of integer values features
+    lookup_set: dictionary
+        dictionary of pairwise interaction effect lookup tables
+    effect_imp_var: float
+        effect importance
+    bound_pct: list of list of float
+        lower bound percentile and upper bound percentile for clipping
+    bound_val: list of lilst of float
+        lower bound value and upper bound value for clipping
+    """
+
+    ### plot pairwise interaction effect
+    var1, var2 = pair
+    bound_pct1, bound_pct2 = bound_pct
+    bound_val1, bound_val2 = bound_val
+    if verbose:
+        print(f"Feature: {var1} and {var2}")
+    
+    x = X[var1]
+    x_min = np.min(x)
+    x_max = np.max(x)
+    y = X[var2]
+    y_min = np.min(y)
+    y_max = np.max(y)
+
+    if var1 in int_var_set:
+        if verbose:
+            print(f"var1: min={x_min}, max={x_max}")
+            print(f"This feature is integer, no need to be capped!")
+    else:
+        if len(bound_pct1) == 2:
+            lb_pct1, ub_pct1 = bound_pct1
+            wq1 = DescrStatsW(data=np.array(X[var1]))
+            [x_min, x_max] = wq1.quantile(probs=np.array([lb_pct1, ub_pct1]), return_pandas=False)
+        if len(bound_val1) == 2:
+            x_min, x_max = bound_val1
+        x = X.loc[(X[var1]>=x_min)&(X[var1]<=x_max), var1]
+        if verbose:
+            print(f"var1: min={np.min(X[var1])}, max={np.max(X[var1])}")
+            print(f"var1 capped at: lb={x_min}, ub={x_max}")
+        
+    if var2 in int_var_set:
+        if verbose:
+            print(F"var2: min={y_min}, max={y_max}")
+            print(f"This feature is integer, no need to be capped!")
+    else:
+        if len(bound_pct2) == 2:
+            lb_pct2, ub_pct2 = bound_pct2
+            wq2 = DescrStatsW(data=np.array(X[var2]))
+            [y_min, y_max] = wq2.quantile(probs=np.array([lb_pct2, ub_pct2]), return_pandas=False)
+        if len(bound_val2) == 2:
+            y_min, y_max = bound_val2
+        y = X.loc[(X[var2]>=y_min)&(X[var2]<=y_max), var2]
+        if verbose:
+            print(f"var2: min={np.min(X[var2])}, max={np.max(X[var2])}")
+            print(F"var2 capped at: lb={y_min}, ub={y_max}")
+    
+    df_x_val = x.value_counts()
+    df_y_val = y.value_counts()
+
+    gs_i = gsi.subgridspec(20, 20, wspace=0.7, hspace=1.4)
+
+    ax_main = f.add_subplot(gs_i[:17, 3:-1])
+
+    ax_main.set_title(str(var1) + " vs "+ str(var2) + ' (' + str("{0:.1%}".format(effect_imp_var)) + ')', fontsize=11)
+
+    df_table_org = lookup_set
+
+    val_min = np.min(df_table_org.values)
+    val_max = np.max(df_table_org.values)
+
+    df_table = (df_table_org - val_min)/(val_max - val_min)
+
+
+    if var1 in int_var_set:
+        df_table.columns = np.ceil(np.array(df_table.columns)) - 0.5
+        x_lb_pt = np.hstack([x_min - 0.5, np.array(df_table.columns[:-1])])
+        x_len = np.hstack([np.array(df_table.columns[:-1]), x_max + 0.5]) - np.hstack([x_min - 0.5, np.array(df_table.columns[:-1])])
+    else:
+        x_lb_pt = np.hstack([x_min, np.array(df_table.columns[:-1])])
+        x_len = np.hstack([np.array(df_table.columns[:-1]), x_max]) - np.hstack([x_min, np.array(df_table.columns[:-1])])
+    if var1 in int_var_set:
+        plt.xlim([x_min - 0.5, x_max + 0.5])
+    else:
+        plt.xlim([x_min, x_max])
+        # if (var2 in int_var_set) & (y_max - y_min < 30):
+    if var2 in int_var_set:
+        df_table.index = np.ceil(np.array(df_table.index)) - 0.5
+        y_lb_pt = np.hstack([y_min - 0.5, np.array(df_table.index[:-1])])
+        y_len = np.hstack([np.array(df_table.index[:-1]), y_max + 0.5]) - np.hstack([y_min - 0.5, np.array(df_table.index[:-1])])
+    else:
+        
+
+
+
 
