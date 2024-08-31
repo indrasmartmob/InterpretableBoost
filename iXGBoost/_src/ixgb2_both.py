@@ -480,7 +480,255 @@ def clean_lookup(df_lookup):
     overlap_index = [df_lookup.index[i_row] for i_row in range(df_lookup.shape[0] - 1) if df_lookup.iloc[i_row][0] == df_lookup.iloc[i_row + 1][0]]
     return df_lookup.drop(overlap_index)
 
+def convert_row(data_col, cutoffs):
+    """Assigns main effect values.
+    
+    Parameters
+    -------------
+    data_col: pandas series
+        series of data column
+    cutoffs: pandas dataframe
+        lookup table of main effect
+    """
+    if np.isnan(cutoffs.index).any():
+        cutoffs_temp = cutoffs.drop(labels=[np.nan])
+    else:
+        cutoffs_temp = cutoffs
+    # Get the intervals used for cutoff values
+    intervals = [-np.inf] + [i for i in cutoffs_temp.index.to_list()]
+    intervals = sorted(list(set(intervals)))
 
+    # Generate the mapping dictionary
+    k = np.arange(len(intervals)-1)
+    v = cutoffs_temp.values.ravel()
+    map_dict = dict(map(lambda i, j: (i, j), k, v))
+    if np.isnan(cutoffs.index).any():
+        map_dict[np.nan] = cutoffs.loc[np.nan, :].values[0]
+    
+    # Get the indices for the binned values
+    values_bin = pd.cut(data_col, intervals, labels=False, right=False)
 
+    return values_bin.map(map_dict).values
+
+def convert_row_2d(data_cols1, data_cols2, cutoffs):
+    """Assigns pairwise interaction effect values.
+    
+    Parameters
+    -------------
+    data_cols1: pandas series
+        series of data column
+    data_cols2: pandas series
+        series of data column
+    cutoffs: pandas dataframe
+        lookup table of pairwise interaction effect
+    """
+    if np.isnan(cutoffs.index).any():
+        cutoffs_temp = cutoffs.drop(np.nan, axis=1).drop(np.nan, axis=0)
+    else:
+        cutoffs_temp = cutoffs
+    intervals1 = [-np.inf] + cutoffs_temp.columns.to_list()
+    intervals2 = [-np.inf] + cutoffs_temp.index.to_list()
+    intervals1 = sorted(list(set(intervals1)))
+    intervals2 = sorted(list(set(intervals2)))
+
+    map_dict = {}
+    for idx_i, v in enumerate(cutoffs_temp.values):
+        for idx_j, w in enumerate(v):
+            map_dict.update({(idx_i, idx_j): w})
+    
+    if np.isnan(cutoffs.index).any():
+        for ind_z, z in enumerate(cutoffs.loc[np.nan, :].values[1:]):
+            map_dict.update({("NaN", ind_z): z})
+        for ind_u, u in enumerate(cutoffs.loc[:, np.nan].values[1:]):
+            map_dict.update({(ind_u, "NaN"): u})
+        map_dict.update({("NaN", "NaN"): cutoffs.loc[np.nan, np.nan]})
+
+        c1 = pd.cut(data_cols1, intervals1, labels=False, right=False).fillna("NaN")
+        c2 = pd.cut(data_cols2, intervals2, labels=False, right=False).fillna("NaN")
+    else:
+        c1 = pd.cut(data_cols1, intervals1, labels=False, right=False)
+        c2 = pd.cut(data_cols2, intervals2, labels=False, right=False)        
+
+    return pd.Series(map(lambda x: map_dict[x], zip(c2, c1))).values
+
+def predict_effects_helper(X, single_effect_index, df_single_lookup_set, pair_effect_index, df_pair_lookup_set):
+    """Assigns main effect values and pairwise effect values to input data, and provides the prediction score
+    
+    Parameters
+    --------------
+    X: pandas dataframe
+        input data
+    single_effect_index: list
+        a list of names of main effect
+    pair_effect_index: list
+        a list of names of pairwise interaction effect
+    df_single_lookup_set: pandas dataframe
+        lookup table for main effect
+    df_pair_lookup_set: pandas dataframe
+        lookup table for pairwise interactoin effect
+    
+    """
+
+    all_results = []
+    all_col_names = []
+
+    for idx, col_name in enumerate(single_effect_index):
+        _t = convert_row(X[col_name], df_single_lookup_set[col_name])
+        all_results.append(_t)
+        all_col_names.append(col_name)
+    
+    for idx, col_names in enumerate(pair_effect_index):
+        _t = convert_row_2d(X[col_names[0]], X[col_names[1]], df_pair_lookup_set[col_names])
+        all_results.append(_t)
+        all_col_names.append(tuple((col_names[0], col_names[1])))
+    
+    effects = pd.DataFrame(
+        dict(map(lambda i, j: (i, j), all_col_names, all_results)),
+    )
+
+    return effects
+
+def convert_lookup(data_col, cutoff):
+    """Assigns main effect values when there are missing values.
+    
+    Parameters
+    -------------
+    data_cols: pandas series
+        series of data column
+    cutoffs: pandas dataframe
+        lookup table of main effect
+    """
+    cutoffs = cutoff.copy()
+    if np.isnan(cutoffs.index).any():
+        cutoffs_temp = cutoffs.drop(labels=[np.nan])
+    else:
+        cutoffs_temp = cutoffs
+    # Get the intervals used for cutoff values
+    intervals = [-np.inf] + [i for i in cutoffs_temp.index.to_list()]
+    intervals = sorted(list(set(intervals)))
+
+    map_dict = {cutoffs_temp.index[i]: set() for i in range(cutoffs_temp.shape[0])}
+    if np.isnan(cutoffs.index).any():
+        map_dict["NaN"] = set()
+        values_bin = pd.cut(data_col, intervals, labels=False, right=False).fillna("NaN")
+    else:
+        values_bin = pd.cut(data_col, intervals, labels=False, right=False)
+    
+    for idx, val in zip(values_bin.index, values_bin.values):
+        if val == "NaN":
+            map_dict["NaN"].add(idx)
+        else:
+            map_dict[cutoffs_temp.index[val]].add(idx)
+
+    new_lookup = pd.DataFrame(list(map_dict.items()), columns = [data_col.name, "obs_location"])
+    new_lookup = new_lookup.set_index(new_lookup.columns[0]).iloc[:, -1]
+
+    for keys, values in map_dict.items():
+        if keys == "NaN":
+            cutoffs.loc[np.nan]=len(values)
+        else:
+            cutoffs.loc[cutoffs.index==keys]=len(values)
+    
+    return cutoffs, new_lookup
+
+def convert_lookup_2d(data_cols1, data_cols2, cutoff):
+    """Assigns pairwise ineraction effect values when there are missing values.
+    
+    Parameters
+    ------------
+    data_cols1: pandas series
+        series of data column
+    data_cols2: pandas series
+        series of data column
+    cutoffs: pandas dataframe
+        lookup table of pairwise interaction effect
+    """
+    cutoffs = cutoff.copy()
+    # Get the intervals used for cutoff values
+    if np.isnan(cutoffs.index).any():
+        cutoffs_temp = cutoffs.drop(np.nan, axis=1).drop(np.nan, axis=0)
+    else:
+        cutoffs_temp = cutoffs
+    intervals1 = [-np.inf] + cutoffs_temp.columns.to_list()
+    intervals2 = [-np.inf] + cutoffs_temp.index.to_list()
+    intervals1 = sorted(list(set(intervals1)))
+    intervals2 = sorted(list(set(intervals2)))
+
+    pair_set = []
+    for row in cutoffs_temp.index:
+        for col in cutoffs_temp.columns:
+            pair_set.append(tuple((row, col)))
+    map_dict = {tuple(var): set() for var in pair_set}
+
+    if np.isnan(cutoffs.index).any():
+        for z in cutoffs.columns[1:]:
+            map_dict.update({("NaN", z): set()})
+        for u in cutoffs.index[1:]:
+            map_dict.update({(u, "NaN"): set()})   
+        map_dict.update({("NaN", "NaN"): set()})
+        c1 = pd.cut(data_cols1, intervals1, labels=False, right=False).fillna("NaN")
+        c2 = pd.cut(data_cols2, intervals2, labels=False, right=False).fillna("NaN")
+    else:
+        c1 = pd.cut(data_cols1, intervals1, labels=False, right=False)
+        c2 = pd.cut(data_cols2, intervals2, labels=False, right=False)
+    
+    for idx, val2, val1 in zip(c2.index, c2.values, c1.values):
+        if (val2 == "NaN")&(val1 != "NaN"):
+            map_dict[tuple(("NaN", cutoffs_temp.columns[val1]))].add(idx)
+        elif (val1 == "NaN")&(val2 != "NaN"):
+            map_dict[tuple((cutoffs_temp.index[val2], "NaN"))].add(idx)
+        elif (val2 == "NaN")&(val1 == "NaN"):
+            map_dict[tuple(("NaN", "NaN"))].add(idx)
+        else:
+            map_dict[tuple((cutoffs_temp.index[val2], cutoffs_temp.columns[val1]))].add(idx)
+    
+    new_lookup = pd.DataFrame(list(map_dict.items()), columns = [tuple((data_cols1.name, data_cols2.name)), "obs_location"])
+    new_lookup = new_lookup.set_index(new_lookup.columns[0]).iloc[:, -1]
+
+    for keys, values in map_dict.items():
+        if (keys[0] != "NaN")&(keys[1] == "NaN"):
+            cutoffs.loc[cutoffs.index==keys[0], np.nan]=len(values)
+        elif (keys[0] == "NaN")&(keys[1] != "NaN"):
+            cutoffs.loc[np.nan, cutoffs.columns==keys[1]]=len(values)
+        elif (keys[0] == "NaN")&(keys[1] == "NaN"):
+            cutoffs.loc[np.nan, np.nan]=len(values)
+        else:
+            cutoffs.loc[cutoffs.index==keys[0], cutoffs.columns==keys[1]]=len(values)
+    
+    return cutoffs, new_lookup
+
+def lookup_obs_helper(X, df_single_lookup_set, df_pair_lookup_set):
+
+    """calculate # of observations in each cell in lookup tables and assign locations of observations in each lookup tables
+    
+    Parameters
+    --------------
+    X: pandas dataframe
+        input data
+    df_single_lookup_set: pandas dataframe
+        lookup table for main effect
+    df_pair_lookup_set: pandas dataframe
+        lookup table for pairwise interaction effect
+
+    """
+
+    df_pair_lookup_num_obs = dict()
+    df_pair_lookup_obs_location = dict()
+    single_effect_index = list(df_single_lookup_set.keys())
+    pair_effect_index = list(df_pair_lookup_set.keys())
+
+    for idx, col_names in enumerate(pair_effect_index):
+        _table2d1, _table2d2 = convert_lookup_2d(X[col_names[0]], X[col_names[1]], df_pair_lookup_set[col_names])
+        df_pair_lookup_num_obs[col_names] = _table2d1
+        df_pair_lookup_obs_location[col_names] = _table2d2
+    
+    df_single_lookup_num_obs = dict()
+    df_single_lookup_obs_location = dict()
+    for idx, col_name in enumerate(single_effect_index):
+        _table1, _table2 = convert_lookup(X[col_name], df_single_lookup_set[col_name])
+        df_single_lookup_num_obs[col_name] = _table1
+        df_single_lookup_obs_location[col_name] = _table2
+    
+    return df_single_lookup_num_obs, df_single_lookup_obs_location, df_pair_lookup_num_obs, df_pair_lookup_obs_location
 
 
