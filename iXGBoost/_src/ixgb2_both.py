@@ -1007,6 +1007,63 @@ def pairwise_val_plot(gsi, f, pair, X, int_var_set, lookup_set, effect_imp_var, 
         y_lb_pt = np.hstack([y_min - 0.5, np.array(df_table.index[:-1])])
         y_len = np.hstack([np.array(df_table.index[:-1]), y_max + 0.5]) - np.hstack([y_min - 0.5, np.array(df_table.index[:-1])])
     else:
+        y_lb_pt = np.hstack([y_min, np.array(df_table.index[:-1])])
+        y_len = np.hstack([np.array(df_table.index[:-1]), y_max]) - np.hstack([y_min, np.array(df_table.index[:-1])])
+    if var2 in int_var_set:
+        plt.ylim([y_min - 0.5, y_max + 0.5])
+    else:
+        plt.ylim([y_min, y_max])
+    cmap = plt.get_cmap("viridis")
+    for i_x in range(len(x_lb_pt)):
+        for i_y in range(len(y_lb_pt)):
+            rect1 = matplotlib.patches.Rectangle((x_lb_pt[i_x], y_lb_pt[i_y]), x_len[i_x], y_len[i_y],
+                                                 color=cmap(df_table.iloc[i_y, i_x]))
+            ax_main.add_patch(rect1)
+    
+    plt.xticks([])
+    plt.yticks([])
+
+    ### plot histogram or bar plot for var2 (y)
+    ax_left = f.add_subplots(gs_i[:17, 0:3])
+    if (var2 in int_var_set) & (y_max - y_min < 30):
+        ax_left.barh(df_y_val.index.tolist(), df_y_val.tolist(), height = 1)
+        if (y_max - y_min <= 12):
+            plt.yticks(df_y_val.index.tolist())
+    else:
+        ax_left.hist(y, bins = 50, orientation="horizontal", align = "left")
+    if var2 in int_var_set:
+        plt.ylim([y_min -0.5, y_max + 0.5])
+    else:
+        plt.ylim([y_min, y_max])
+    
+    plt.xticks([])
+
+    ### plot histogram or bar plot for var1 (x)
+    ax_bottom = f.add_subplots(gs_i[17:, 3:-1])
+    if (var1 in int_var_set) & (x_max - x_min < 30):
+        ax_bottom.bar(df_x_val.index.tolist(), df_x_val.tolist(), width = 1)
+        if (x_max - x_min <= 12):
+            plt.xticks(df_x_val.index.tolist())
+    else:
+        ax_bottom.hist(x, bins = 50, align = "mid")
+    if var1 in int_var_set:
+        plt.xlim([x_min - 0.5, x_max + 0.50])
+    else:
+        plt.xlim([x_min, x_max])
+    
+    plt.yticks([])
+
+    ### plot colormap
+    ax_bar = f.add_subplot(gs_i[:17, -1])
+    gradient = np.linspace(1, 0, 256)
+    gradient = np.vstack((gradient, gradient))
+    ax_bar.imshow(gradient.T, extent = [0, 1, val_min, val_max], aspect="auto", cmap=colormaps["viridis"])
+    plt.yticks(np.linspace(val_min + (val_max - val_min) / 6, val_max - (val_max - val_min) / 6, num=4))
+    ax_bar.yaxis.set_major_formatter(ticker.FormatStrFormatter("%.2f"))
+    ax_bar.yaxis.tick_right()
+    plt.xticks([])
+
+    
         
 
 
